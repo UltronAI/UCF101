@@ -13,6 +13,7 @@ import os
 import math
 import torch
 from torch import nn
+import numpy as np
 
 # bottleneck
 class Bottleneck(nn.Module):
@@ -121,6 +122,32 @@ class ResNet(nn.Module):
         out = self.fc_custom(x)
         return out
 
+def weight_transform(weight_dict, target_input_channel):
+    '''
+    load pretrain weight, transfer it to target input channel
+    '''
+    input_weight_name = 'conv1_custom.weight'
+    origin_input_channel = weight_dict[input_weight_name].shape[1]
+    if origin_input_channel == target_input_channel:
+        return weight_dict
+    # cross modality
+    transform_weight = weight_dict[input_weight_name].numpy()
+    transform_weight = np.mean(transform_weight, axis = 1, keepdims = True)
+    transform_weight = np.repeat(transform_weight, target_input_channel, axis = 1)
+    weight_dict[input_weight_name] = torch.from_numpy(transform_weight)
+    return weight_dict
+
+def fc_transform(weight_dict, target_out_classes):
+    '''
+    load pretrain weight, transfer fc
+    '''
+    input_fc_name_list = ['fc_custom.weight', 'fc_custom.bias']
+    for input_fc_name in input_fc_name_list:
+        if weight_dict[input_fc_name].shape[0] < target_out_classes:
+            raise Exception('out of range')
+        weight_dict[input_fc_name] = weight_dict[input_fc_name][:target_out_classes,...]
+    return weight_dict
+
 class Network(nn.Module):
     '''
     network class
@@ -133,9 +160,8 @@ class Network(nn.Module):
         if pretrain_path is not None:
             if not os.path.exists(pretrain_path):
                 raise Exception(f'{pretrain_path} does NOT exist')
-            self.net.load_state_dict(
-                torch.load(pretrain_path, map_location = lambda storage, loc: storage)
-            )
+            weight_dict = torch.load(pretrain_path, map_location = lambda storage, loc: storage)
+            self.net.load_state_dict(fc_transform(weight_transform(weight_dict, in_channels), out_classes))
     def forward(self, x):
         '''
         forward
@@ -148,4 +174,5 @@ class Network(nn.Module):
         torch.save(self.net.state_dict(), save_name)
 
 if __name__ == '__main__':
-    net = Network(pretrain_path = './zoo/spatial_pretrain.pth')
+    net = Network(in_channels = 13, out_classes = 101, pretrain_path = './zoo/spatial_pretrain.pth')
+    print(net)
